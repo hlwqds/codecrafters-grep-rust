@@ -62,7 +62,12 @@ fn match_literal(input_line: &str, literal: &str) -> Option<usize> {
     input_line.find(literal)
 }
 
-fn match_pattern(input_line: &str, pattern: &Pattern, anchored: bool) -> Option<usize> {
+fn match_pattern(
+    input_line: &str,
+    pattern: &Pattern,
+    anchored: bool,
+    end_anchored: bool,
+) -> Option<usize> {
     let (pos, len) = match &pattern.p_type {
         PatternType::Digit => (match_digit(input_line)?, 1),
         PatternType::Word => (match_word(input_line)?, 1),
@@ -71,6 +76,9 @@ fn match_pattern(input_line: &str, pattern: &Pattern, anchored: bool) -> Option<
         PatternType::Literal(literal) => (match_literal(input_line, literal)?, literal.len()),
     };
     if anchored && pos != 0 {
+        return None;
+    }
+    if end_anchored && pos + len != input_line.len() {
         return None;
     }
     Some(pos + len)
@@ -132,14 +140,18 @@ fn main() {
 
     let anchored = pattern.starts_with('^');
     let pattern = pattern.trim_start_matches('^');
+    let end_anchored = pattern.ends_with('$');
+    let pattern = pattern.trim_end_matches('$');
 
     let patterns = generate_patterns(split_patterns(pattern));
+    let last_idx = patterns.len() - 1;
 
     let mut step: usize = 0;
 
     for (i, pattern) in patterns.into_iter().enumerate() {
         let anc = anchored && i == 0;
-        if let Some(s_step) = match_pattern(&input_line[step..], &pattern, anc) {
+        let eanc = end_anchored && i == last_idx;
+        if let Some(s_step) = match_pattern(&input_line[step..], &pattern, anc, eanc) {
             step += s_step
         } else {
             process::exit(1)
