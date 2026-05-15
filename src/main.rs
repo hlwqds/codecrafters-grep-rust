@@ -6,9 +6,17 @@ fn match_digit(input_line: &str) -> bool {
     input_line.chars().any(|c| c.is_ascii_digit())
 }
 
+fn match_word(input_line: &str) -> bool {
+    input_line
+        .chars()
+        .any(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 fn match_pattern(input_line: &str, pattern: &str) -> bool {
     if pattern.starts_with("\\d") {
         match_digit(input_line)
+    } else if pattern.starts_with("\\w") {
+        match_word(input_line)
     } else {
         input_line.contains(pattern)
     }
