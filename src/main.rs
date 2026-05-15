@@ -1,7 +1,6 @@
 use std::env;
 use std::io;
 use std::process;
-use std::sync::PoisonError;
 
 fn match_digit(input_line: &str) -> bool {
     input_line.chars().any(|c| c.is_ascii_digit())
@@ -13,8 +12,13 @@ fn match_word(input_line: &str) -> bool {
         .any(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-fn match_positive(input_line: &str, positive: &str) -> bool {
-    input_line.chars().any(|c| positive.contains(c))
+fn match_char_group(input_line: &str, group: &str) -> bool {
+    if group.starts_with('^') {
+        let chars = &group[1..];
+        input_line.chars().any(|c| !chars.contains(c))
+    } else {
+        input_line.chars().any(|c| group.contains(c))
+    }
 }
 
 fn match_pattern(input_line: &str, pattern: &str) -> bool {
@@ -23,7 +27,7 @@ fn match_pattern(input_line: &str, pattern: &str) -> bool {
     } else if pattern.starts_with("\\w") {
         match_word(input_line)
     } else if pattern.starts_with("[") && pattern.ends_with("]") {
-        match_positive(input_line, &pattern[1..pattern.len() - 1])
+        match_char_group(input_line, &pattern[1..pattern.len() - 1])
     } else {
         input_line.contains(pattern)
     }
