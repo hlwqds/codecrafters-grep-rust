@@ -2,11 +2,15 @@ use std::env;
 use std::io;
 use std::process;
 
+fn match_digit(input_line: &str) -> bool {
+    input_line.chars().any(|c| c.is_ascii_digit())
+}
+
 fn match_pattern(input_line: &str, pattern: &str) -> bool {
-    if pattern.chars().count() == 1 {
-        input_line.contains(pattern)
+    if pattern.starts_with("\\d") {
+        match_digit(input_line)
     } else {
-        panic!("Unhandled pattern: {}", pattern)
+        input_line.contains(pattern)
     }
 }
 
@@ -25,7 +29,6 @@ fn main() {
 
     io::stdin().read_line(&mut input_line).unwrap();
 
-    // TODO: Uncomment the code below to pass the first stage
     if match_pattern(&input_line, &pattern) {
         process::exit(0)
     } else {
