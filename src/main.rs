@@ -62,14 +62,18 @@ fn match_literal(input_line: &str, literal: &str) -> Option<usize> {
     input_line.find(literal)
 }
 
-fn match_pattern(input_line: &str, pattern: &Pattern) -> Option<usize> {
-    match &pattern.p_type {
-        PatternType::Digit => match_digit(input_line),
-        PatternType::Word => match_word(input_line),
-        PatternType::CharGroup(group) => match_char_group(input_line, group),
-        PatternType::NegCharGroup(group) => match_neg_char_group(input_line, group),
-        PatternType::Literal(literal) => match_literal(input_line, literal),
+fn match_pattern(input_line: &str, pattern: &Pattern, anchored: bool) -> Option<usize> {
+    let (pos, len) = match &pattern.p_type {
+        PatternType::Digit => (match_digit(input_line)?, 1),
+        PatternType::Word => (match_word(input_line)?, 1),
+        PatternType::CharGroup(group) => (match_char_group(input_line, group)?, 1),
+        PatternType::NegCharGroup(group) => (match_neg_char_group(input_line, group)?, 1),
+        PatternType::Literal(literal) => (match_literal(input_line, literal)?, literal.len()),
+    };
+    if anchored && pos != 0 {
+        return None;
     }
+    Some(pos + len)
 }
 
 fn split_patterns(pattern: &str) -> Vec<String> {
@@ -126,12 +130,16 @@ fn main() {
 
     io::stdin().read_line(&mut input_line).unwrap();
 
-    let patterns = generate_patterns(split_patterns(&pattern));
+    let anchored = pattern.starts_with('^');
+    let pattern = pattern.trim_start_matches('^');
+
+    let patterns = generate_patterns(split_patterns(pattern));
 
     let mut step: usize = 0;
 
-    for pattern in patterns {
-        if let Some(s_step) = match_pattern(&input_line[step..], &pattern) {
+    for (i, pattern) in patterns.into_iter().enumerate() {
+        let anc = anchored && i == 0;
+        if let Some(s_step) = match_pattern(&input_line[step..], &pattern, anc) {
             step += s_step
         } else {
             process::exit(1)
