@@ -8,6 +8,7 @@ enum PatternType {
     CharGroup(String),
     NegCharGroup(String),
     Literal(String),
+    OneOrMore(Box<PatternType>),
 }
 
 struct Pattern {
@@ -15,7 +16,14 @@ struct Pattern {
 }
 
 impl Pattern {
-    fn new(pattern: String) -> Self {
+    fn new(pattern: &str) -> Self {
+        if pattern.ends_with('+') {
+            let inner = &pattern[..pattern.len() - 1];
+            let inner_pattern = Pattern::new(inner);
+            return Pattern {
+                p_type: PatternType::OneOrMore(Box::new(inner_pattern.p_type)),
+            };
+        }
         if pattern.starts_with("\\d") {
             Pattern {
                 p_type: PatternType::Digit,
@@ -62,26 +70,66 @@ fn match_literal(input_line: &str, literal: &str) -> Option<usize> {
     input_line.find(literal)
 }
 
-fn match_pattern(
-    input_line: &str,
-    pattern: &Pattern,
-    anchored: bool,
-    end_anchored: bool,
-) -> Option<usize> {
-    let (pos, len) = match &pattern.p_type {
-        PatternType::Digit => (match_digit(input_line)?, 1),
-        PatternType::Word => (match_word(input_line)?, 1),
-        PatternType::CharGroup(group) => (match_char_group(input_line, group)?, 1),
-        PatternType::NegCharGroup(group) => (match_neg_char_group(input_line, group)?, 1),
-        PatternType::Literal(literal) => (match_literal(input_line, literal)?, literal.len()),
-    };
-    if anchored && pos != 0 {
-        return None;
+fn char_matches(c: char, p_type: &PatternType) -> bool {
+    match p_type {
+        PatternType::Digit => c.is_ascii_digit(),
+        PatternType::Word => c.is_ascii_alphanumeric() || c == '_',
+        PatternType::CharGroup(group) => group.contains(c),
+        PatternType::NegCharGroup(group) => !group.contains(c),
+        PatternType::Literal(lit) => lit.len() == 1 && lit.as_bytes()[0] == c as u8,
+        PatternType::OneOrMore(_) => false,
     }
-    if end_anchored && pos + len != input_line.len() {
-        return None;
+}
+
+fn match_single(input_line: &str, pattern: &Pattern) -> Option<(usize, usize)> {
+    match &pattern.p_type {
+        PatternType::Digit => Some((match_digit(input_line)?, 1)),
+        PatternType::Word => Some((match_word(input_line)?, 1)),
+        PatternType::CharGroup(group) => Some((match_char_group(input_line, group)?, 1)),
+        PatternType::NegCharGroup(group) => Some((match_neg_char_group(input_line, group)?, 1)),
+        PatternType::Literal(literal) => Some((match_literal(input_line, literal)?, literal.len())),
+        PatternType::OneOrMore(_) => None,
     }
-    Some(pos + len)
+}
+
+/// Recursively match all patterns, returning total consumed length from input_line.
+/// Supports backtracking for OneOrMore.
+fn match_patterns(input_line: &str, patterns: &[Pattern], anchored: bool) -> Option<usize> {
+    if patterns.is_empty() {
+        return Some(0);
+    }
+
+    let pattern = &patterns[0];
+    let rest = &patterns[1..];
+
+    match &pattern.p_type {
+        PatternType::OneOrMore(inner) => {
+            let start = input_line.find(|c: char| char_matches(c, inner))?;
+            if anchored && start != 0 {
+                return None;
+            }
+            // Try from 1 match upward, return first that lets rest succeed
+            let mut end = start;
+            for c in input_line[start..].chars() {
+                if !char_matches(c, inner) {
+                    break;
+                }
+                end += c.len_utf8();
+                if let Some(rest_consumed) = match_patterns(&input_line[end..], rest, false) {
+                    return Some(end + rest_consumed);
+                }
+            }
+            None
+        }
+        _ => {
+            let (pos, len) = match_single(input_line, pattern)?;
+            if anchored && pos != 0 {
+                return None;
+            }
+            let end = pos + len;
+            match_patterns(&input_line[end..], rest, false).map(|r| end + r)
+        }
+    }
 }
 
 fn split_patterns(pattern: &str) -> Vec<String> {
@@ -102,9 +150,27 @@ fn split_patterns(pattern: &str) -> Vec<String> {
                     break;
                 }
             }
+        } else if c == '+' {
+            // + modifies the previous token
+            if let Some(last) = res.pop() {
+                if last.starts_with('\\') || last.starts_with('[') {
+                    // \d+ or [abc]+ — attach + directly
+                    res.push(format!("{}+", last));
+                } else if last.len() > 1 {
+                    // "aba" + → "ab" + "a+"
+                    let prefix = &last[..last.len() - 1];
+                    let last_char = &last[last.len() - 1..];
+                    res.push(prefix.to_string());
+                    res.push(format!("{}+", last_char));
+                } else {
+                    // Single char like "a" → "a+"
+                    res.push(format!("{}+", last));
+                }
+            }
+            continue;
         } else {
             while let Some(&nc) = chars.peek() {
-                if nc == '\\' || nc == '[' {
+                if nc == '\\' || nc == '[' || nc == '+' {
                     break;
                 }
                 p.push(chars.next().unwrap());
@@ -116,16 +182,12 @@ fn split_patterns(pattern: &str) -> Vec<String> {
 }
 
 fn generate_patterns(patterns: Vec<String>) -> Vec<Pattern> {
-    let mut res: Vec<Pattern> = vec![];
-    for pattern in patterns {
-        res.push(Pattern::new(pattern));
-    }
-    res
+    patterns.into_iter().map(|p| Pattern::new(&p)).collect()
 }
 
 // Usage: echo <input_text> | your_program.sh -E <pattern>
 fn main() {
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
+    // You can use print statements as following for debugging, they'll be visible when running tests.
     eprintln!("Logs from your program will appear here!");
 
     if env::args().nth(1).unwrap() != "-E" {
@@ -144,18 +206,9 @@ fn main() {
     let pattern = pattern.trim_end_matches('$');
 
     let patterns = generate_patterns(split_patterns(pattern));
-    let last_idx = patterns.len() - 1;
 
-    let mut step: usize = 0;
-
-    for (i, pattern) in patterns.into_iter().enumerate() {
-        let anc = anchored && i == 0;
-        let eanc = end_anchored && i == last_idx;
-        if let Some(s_step) = match_pattern(&input_line[step..], &pattern, anc, eanc) {
-            step += s_step
-        } else {
-            process::exit(1)
-        }
+    match match_patterns(&input_line, &patterns, anchored) {
+        Some(consumed) if !end_anchored || consumed == input_line.len() => process::exit(0),
+        _ => process::exit(1),
     }
-    process::exit(0)
 }
