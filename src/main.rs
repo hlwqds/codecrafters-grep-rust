@@ -9,6 +9,7 @@ enum PatternType {
     NegCharGroup(String),
     Literal(String),
     OneOrMore(Box<PatternType>),
+    ZeroOrOne(Box<PatternType>),
 }
 
 struct Pattern {
@@ -22,6 +23,12 @@ impl Pattern {
             let inner_pattern = Pattern::new(inner);
             return Pattern {
                 p_type: PatternType::OneOrMore(Box::new(inner_pattern.p_type)),
+            };
+        } else if pattern.ends_with('?') {
+            let inner = &pattern[..pattern.len() - 1];
+            let inner_pattern = Pattern::new(inner);
+            return Pattern {
+                p_type: PatternType::ZeroOrOne(Box::new(inner_pattern.p_type)),
             };
         }
         if pattern.starts_with("\\d") {
@@ -78,6 +85,7 @@ fn char_matches(c: char, p_type: &PatternType) -> bool {
         PatternType::NegCharGroup(group) => !group.contains(c),
         PatternType::Literal(lit) => lit.len() == 1 && lit.as_bytes()[0] == c as u8,
         PatternType::OneOrMore(_) => false,
+        &PatternType::ZeroOrOne(_) => false,
     }
 }
 
@@ -89,6 +97,7 @@ fn match_single(input_line: &str, pattern: &Pattern) -> Option<(usize, usize)> {
         PatternType::NegCharGroup(group) => Some((match_neg_char_group(input_line, group)?, 1)),
         PatternType::Literal(literal) => Some((match_literal(input_line, literal)?, literal.len())),
         PatternType::OneOrMore(_) => None,
+        &PatternType::ZeroOrOne(_) => None,
     }
 }
 
@@ -115,11 +124,24 @@ fn match_patterns(input_line: &str, patterns: &[Pattern], anchored: bool) -> Opt
                     break;
                 }
                 end += c.len_utf8();
-                if let Some(rest_consumed) = match_patterns(&input_line[end..], rest, false) {
+                if let Some(rest_consumed) = match_patterns(&input_line[end..], rest, true) {
                     return Some(end + rest_consumed);
                 }
             }
             None
+        }
+        PatternType::ZeroOrOne(inner) => {
+            // Try 1 match, then 0 matches
+            if let Some(c) = input_line.chars().next() {
+                if char_matches(c, inner) {
+                    let end = c.len_utf8();
+                    if let Some(rest_consumed) = match_patterns(&input_line[end..], rest, true) {
+                        return Some(end + rest_consumed);
+                    }
+                }
+            }
+            // Try matching 0 times
+            match_patterns(input_line, rest, true)
         }
         _ => {
             let (pos, len) = match_single(input_line, pattern)?;
@@ -127,7 +149,7 @@ fn match_patterns(input_line: &str, patterns: &[Pattern], anchored: bool) -> Opt
                 return None;
             }
             let end = pos + len;
-            match_patterns(&input_line[end..], rest, false).map(|r| end + r)
+            match_patterns(&input_line[end..], rest, true).map(|r| end + r)
         }
     }
 }
@@ -150,27 +172,27 @@ fn split_patterns(pattern: &str) -> Vec<String> {
                     break;
                 }
             }
-        } else if c == '+' {
+        } else if c == '+' || c == '?' {
             // + modifies the previous token
             if let Some(last) = res.pop() {
                 if last.starts_with('\\') || last.starts_with('[') {
-                    // \d+ or [abc]+ — attach + directly
-                    res.push(format!("{}+", last));
+                    // \d+ or [abc](+/?) — attach + directly
+                    res.push(format!("{}{}", last, c));
                 } else if last.len() > 1 {
-                    // "aba" + → "ab" + "a+"
+                    // "aba" + → "ab" + "a(+/?)"
                     let prefix = &last[..last.len() - 1];
                     let last_char = &last[last.len() - 1..];
                     res.push(prefix.to_string());
-                    res.push(format!("{}+", last_char));
+                    res.push(format!("{}{}", last_char, c));
                 } else {
-                    // Single char like "a" → "a+"
-                    res.push(format!("{}+", last));
+                    // Single char like "a" → "a(+/??"
+                    res.push(format!("{}{}", last, c));
                 }
             }
             continue;
         } else {
             while let Some(&nc) = chars.peek() {
-                if nc == '\\' || nc == '[' || nc == '+' {
+                if nc == '\\' || nc == '[' || nc == '+' || nc == '?' || nc == '*' {
                     break;
                 }
                 p.push(chars.next().unwrap());
