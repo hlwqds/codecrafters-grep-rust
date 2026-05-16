@@ -10,6 +10,7 @@ enum PatternType {
     Literal(String),
     OneOrMore(Box<PatternType>),
     ZeroOrOne(Box<PatternType>),
+    WildCard,
 }
 
 struct Pattern {
@@ -29,6 +30,11 @@ impl Pattern {
             let inner_pattern = Pattern::new(inner);
             return Pattern {
                 p_type: PatternType::ZeroOrOne(Box::new(inner_pattern.p_type)),
+            };
+        }
+        if pattern == "." {
+            return Pattern {
+                p_type: PatternType::WildCard,
             };
         }
         if pattern.starts_with("\\d") {
@@ -65,6 +71,14 @@ fn match_word(input_line: &str) -> Option<usize> {
     input_line.find(|c: char| c.is_ascii_alphanumeric() || c == '_')
 }
 
+fn match_wildcard(input_line: &str) -> Option<usize> {
+    if !input_line.is_empty() {
+        Some(0)
+    } else {
+        None
+    }
+}
+
 fn match_char_group(input_line: &str, group: &str) -> Option<usize> {
     input_line.find(|c| group.contains(c))
 }
@@ -86,6 +100,7 @@ fn char_matches(c: char, p_type: &PatternType) -> bool {
         PatternType::Literal(lit) => lit.len() == 1 && lit.as_bytes()[0] == c as u8,
         PatternType::OneOrMore(_) => false,
         &PatternType::ZeroOrOne(_) => false,
+        &PatternType::WildCard => true,
     }
 }
 
@@ -98,6 +113,7 @@ fn match_single(input_line: &str, pattern: &Pattern) -> Option<(usize, usize)> {
         PatternType::Literal(literal) => Some((match_literal(input_line, literal)?, literal.len())),
         PatternType::OneOrMore(_) => None,
         &PatternType::ZeroOrOne(_) => None,
+        &PatternType::WildCard => Some((match_wildcard(input_line)?, 1)),
     }
 }
 
@@ -190,9 +206,10 @@ fn split_patterns(pattern: &str) -> Vec<String> {
                 }
             }
             continue;
+        } else if c == '.' {
         } else {
             while let Some(&nc) = chars.peek() {
-                if nc == '\\' || nc == '[' || nc == '+' || nc == '?' || nc == '*' {
+                if nc == '\\' || nc == '[' || nc == '+' || nc == '?' || nc == '*' || nc == '.' {
                     break;
                 }
                 p.push(chars.next().unwrap());
