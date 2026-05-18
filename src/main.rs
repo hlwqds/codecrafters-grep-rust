@@ -11,6 +11,7 @@ enum PatternType {
     OneOrMore(Box<PatternType>),
     ZeroOrOne(Box<PatternType>),
     WildCard,
+    Alternation(Vec<String>),
 }
 
 struct Pattern {
@@ -54,6 +55,14 @@ impl Pattern {
                 Pattern {
                     p_type: PatternType::CharGroup(pattern[1..pattern.len() - 1].to_string()),
                 }
+            }
+        } else if pattern.starts_with("(") && pattern.ends_with(")") {
+            let candidates: Vec<String> = pattern[1..pattern.len() - 1]
+                .split("|")
+                .map(|s| s.to_string())
+                .collect();
+            Pattern {
+                p_type: PatternType::Alternation(candidates),
             }
         } else {
             Pattern {
@@ -101,7 +110,17 @@ fn char_matches(c: char, p_type: &PatternType) -> bool {
         PatternType::OneOrMore(_) => false,
         &PatternType::ZeroOrOne(_) => false,
         &PatternType::WildCard => true,
+        &PatternType::Alternation(_) => false,
     }
+}
+
+fn match_alternation(input_line: &str, matchlist: &[String]) -> Option<(usize, usize)> {
+    for match_s in matchlist {
+        if let Some(index) = input_line.find(match_s.as_str()) {
+            return Some((index, match_s.len()));
+        }
+    }
+    None
 }
 
 fn match_single(input_line: &str, pattern: &Pattern) -> Option<(usize, usize)> {
@@ -114,6 +133,7 @@ fn match_single(input_line: &str, pattern: &Pattern) -> Option<(usize, usize)> {
         PatternType::OneOrMore(_) => None,
         &PatternType::ZeroOrOne(_) => None,
         &PatternType::WildCard => Some((match_wildcard(input_line)?, 1)),
+        PatternType::Alternation(matchlist) => match_alternation(input_line, matchlist),
     }
 }
 
@@ -188,6 +208,13 @@ fn split_patterns(pattern: &str) -> Vec<String> {
                     break;
                 }
             }
+        } else if c == '(' {
+            while let Some(&nc) = chars.peek() {
+                p.push(chars.next().unwrap());
+                if nc == ')' {
+                    break;
+                }
+            }
         } else if c == '+' || c == '?' {
             // + modifies the previous token
             if let Some(last) = res.pop() {
@@ -209,7 +236,14 @@ fn split_patterns(pattern: &str) -> Vec<String> {
         } else if c == '.' {
         } else {
             while let Some(&nc) = chars.peek() {
-                if nc == '\\' || nc == '[' || nc == '+' || nc == '?' || nc == '*' || nc == '.' {
+                if nc == '\\'
+                    || nc == '['
+                    || nc == '('
+                    || nc == '+'
+                    || nc == '?'
+                    || nc == '*'
+                    || nc == '.'
+                {
                     break;
                 }
                 p.push(chars.next().unwrap());
